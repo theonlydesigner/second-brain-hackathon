@@ -1,65 +1,162 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { useQuery, useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { Doc, Id } from "@/convex/_generated/dataModel";
+import { extractYoutubeVideoId, chunkTranscriptSegments } from "@/lib/youtube";
+import type { TranscriptResponse } from "./api/transcript/route";
 
 export default function Home() {
+  const [url, setUrl] = useState("");
+  const [isIngesting, setIsIngesting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Convex mutations — called directly from the browser, no action needed
+  const insertDraftVideo = useMutation(api.videos.insertDraftVideo);
+  const insertChunks = useMutation(api.videos.insertChunks);
+  const updateVideoStatus = useMutation(api.videos.updateVideoStatus);
+  const videos = useQuery(api.videos.getVideos);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+
+    setIsIngesting(true);
+    setErrorMsg(null);
+
+    let convexVideoId: Id<"videos"> | null = null;
+
+    try {
+      // 1. Extract YouTube video ID from URL (runs in browser)
+      const youtubeId = extractYoutubeVideoId(url.trim());
+      if (!youtubeId) throw new Error("Invalid YouTube URL");
+
+      // 2. Call Next.js route handler for transcript + metadata.
+      //    This runs on the Next.js server (good IP reputation with YouTube).
+      //    The browser calls it as a relative URL — no localhost/SSRF issue.
+      const res = await fetch("/api/transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId: youtubeId }),
+      });
+
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        throw new Error(err.error ?? `HTTP ${res.status} from transcript API`);
+      }
+
+      const data = (await res.json()) as TranscriptResponse;
+      const { segments, title, author, thumbnailUrl } = data;
+
+      if (!segments || segments.length === 0) {
+        throw new Error("No transcript segments returned from API");
+      }
+
+      // 3. Create the video record in Convex (status = "ingesting")
+      convexVideoId = await insertDraftVideo({
+        youtubeId,
+        title,
+        channelName: author,
+        thumbnailUrl,
+      });
+
+      // 4. Chunk the transcript into 5-minute windows (runs in browser)
+      const chunks = chunkTranscriptSegments(segments);
+
+      // 5. Persist chunks to Convex
+      await insertChunks({ videoId: convexVideoId, chunks });
+
+      // 6. Mark the video as completed
+      await updateVideoStatus({ videoId: convexVideoId, status: "completed" });
+
+      setUrl("");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("Ingestion failed:", msg);
+      setErrorMsg(msg);
+
+      // If the video record was already created, mark it failed
+      if (convexVideoId) {
+        await updateVideoStatus({ videoId: convexVideoId, status: "failed" }).catch(
+          () => {} // best-effort
+        );
+      }
+    } finally {
+      setIsIngesting(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="p-8 max-w-4xl mx-auto font-sans">
+      <h1 className="text-3xl font-bold mb-8">Second Brain MVP</h1>
+
+      <form onSubmit={handleSubmit} className="mb-4 flex gap-4">
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Paste YouTube URL here…"
+          className="flex-1 p-3 border border-gray-300 rounded text-black"
+          disabled={isIngesting}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+        <button
+          type="submit"
+          className="bg-blue-600 text-white px-6 py-3 rounded font-medium disabled:opacity-50"
+          disabled={isIngesting || !url.trim()}
+        >
+          {isIngesting ? "Ingesting…" : "Ingest Video"}
+        </button>
+      </form>
+
+      {errorMsg && (
+        <div className="mb-8 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          <strong>Error:</strong> {errorMsg}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      )}
+
+      <h2 className="text-2xl font-semibold mb-6">Your Videos</h2>
+
+      {videos === undefined ? (
+        <p>Loading…</p>
+      ) : videos.length === 0 ? (
+        <p className="text-gray-500">No videos ingested yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {videos.map((video: Doc<"videos">) => (
+            <div
+              key={video._id}
+              className="border p-4 rounded-lg flex flex-col gap-2"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={video.thumbnailUrl}
+                alt={video.title}
+                className="w-full h-auto rounded"
+              />
+              <h3 className="font-semibold text-lg line-clamp-2">
+                {video.title}
+              </h3>
+              <p className="text-sm text-gray-500 line-clamp-1">
+                {video.description}
+              </p>
+              <div className="mt-auto pt-4 flex justify-between items-center">
+                <span
+                  className={`text-xs px-2 py-1 rounded ${
+                    video.status === "completed"
+                      ? "bg-green-100 text-green-800"
+                      : video.status === "failed"
+                        ? "bg-red-100 text-red-800"
+                        : "bg-yellow-100 text-yellow-800"
+                  }`}
+                >
+                  {video.status}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
-      </main>
-    </div>
+      )}
+    </main>
   );
 }
