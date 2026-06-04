@@ -9,6 +9,7 @@
  */
 
 import type * as chunks from "../chunks.js";
+import type * as folders from "../folders.js";
 import type * as videoActions from "../videoActions.js";
 import type * as videos from "../videos.js";
 
@@ -20,6 +21,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   chunks: typeof chunks;
+  folders: typeof folders;
   videoActions: typeof videoActions;
   videos: typeof videos;
 }>;

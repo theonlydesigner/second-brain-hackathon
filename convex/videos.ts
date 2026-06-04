@@ -18,6 +18,29 @@ export const getVideoById = query({
   },
 });
 
+export const getVideosByFolder = query({
+  args: { folderId: v.id("folders") },
+  handler: async (ctx, args): Promise<Doc<"videos">[]> => {
+    return await ctx.db
+      .query("videos")
+      .withIndex("by_folder", (q) => q.eq("folderId", args.folderId))
+      .order("desc")
+      .collect();
+  },
+});
+
+export const getUnfolderedVideos = query({
+  args: {},
+  handler: async (ctx): Promise<Doc<"videos">[]> => {
+    return await ctx.db
+      .query("videos")
+      .withIndex("by_folder", (q) => q.eq("folderId", undefined))
+      .order("desc")
+      .collect();
+  },
+});
+
+
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
 export const insertDraftVideo = mutation({
