@@ -101,13 +101,17 @@ function FolderCard({
 function VideoCard({ video }: { video: Doc<"videos"> }) {
   return (
     <div className="border border-gray-200 rounded-lg p-3 flex flex-col gap-2 bg-white">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={video.thumbnailUrl}
-        alt={video.title}
-        className="w-full aspect-video object-cover rounded"
-      />
-      <p className="font-medium text-sm line-clamp-2">{video.title}</p>
+      <Link href={`/videos/${video._id}`} className="group relative block overflow-hidden rounded">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={video.thumbnailUrl}
+          alt={video.title}
+          className="w-full aspect-video object-cover transition-transform group-hover:scale-105"
+        />
+      </Link>
+      <Link href={`/videos/${video._id}`}>
+        <p className="font-medium text-sm line-clamp-2 hover:text-blue-600 transition-colors">{video.title}</p>
+      </Link>
       <p className="text-xs text-gray-500 line-clamp-1">{video.description}</p>
       <div className="mt-auto flex justify-between items-center">
         <span

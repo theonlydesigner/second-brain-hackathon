@@ -42,12 +42,18 @@ export default defineSchema({
     endTime: v.number(),
     text: v.string(),
     chunkSummary: v.optional(v.string()),
-  }).index("by_video", ["videoId", "sequence"]),
+  })
+    .index("by_video", ["videoId", "sequence"])
+    .searchIndex("search_text", {
+      searchField: "text",
+      filterFields: ["videoId"],
+    }),
 
   messages: defineTable({
     videoId: v.id("videos"),
     sender: v.union(v.literal("user"), v.literal("assistant")),
     text: v.string(),
     createdAt: v.number(),
+    sourceChunkIds: v.optional(v.array(v.id("transcriptChunks"))),
   }).index("by_video", ["videoId"]),
 });

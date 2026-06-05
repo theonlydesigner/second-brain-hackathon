@@ -41,7 +41,17 @@ export const getUnfolderedVideos = query({
   },
 });
 
-// Internal query used by the summarization action to fetch all chunks
+/**
+ * Fetches transcript chunks for a video in chronological order.
+ *
+ * Used by the single-pass summarization action (summaryActions.ts).
+ *
+ * @deprecated-field chunkSummary — the chunkSummary field on each returned
+ * document is no longer written by the summarization pipeline (removed in the
+ * Day 3 → single-pass refactor). The field remains in the schema for backward
+ * compatibility with existing rows. Schedule removal after Day 5 once the
+ * embedding pipeline (which may read chunks) is confirmed not to need it.
+ */
 export const getChunksForSummarization = internalQuery({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args): Promise<Doc<"transcriptChunks">[]> => {
@@ -124,18 +134,15 @@ export const insertChunks = mutation({
   },
 });
 
-// Called by the map step — saves a single chunk's summary
-export const saveChunkSummary = internalMutation({
-  args: {
-    chunkId: v.id("transcriptChunks"),
-    chunkSummary: v.string(),
-  },
-  handler: async (ctx, args): Promise<void> => {
-    await ctx.db.patch(args.chunkId, { chunkSummary: args.chunkSummary });
-  },
-});
+// NOTE: saveChunkSummary has been removed. The map-reduce pipeline that
+// called it was replaced by single-pass summarization in summaryActions.ts.
+// The chunkSummary field in the schema is kept for backward compatibility
+// with existing rows and will be removed after Day 5.
 
-// Called by the reduce step — atomically saves all insights + flips status to completed
+/**
+ * Atomically saves all AI insights and flips status to "completed".
+ * This is the only mutation in the codebase that sets status: "completed".
+ */
 export const saveInsights = internalMutation({
   args: {
     videoId: v.id("videos"),
@@ -159,8 +166,10 @@ export const saveInsights = internalMutation({
   },
 });
 
-// Public mutation — browser fires this to schedule async summarization.
-// Uses scheduler so the browser never waits for Gemini.
+/**
+ * Public mutation — browser fires this to schedule async summarization.
+ * Uses scheduler so the browser never waits for Gemini.
+ */
 export const scheduleSummarization = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args): Promise<void> => {

@@ -8,8 +8,10 @@
  * @module
  */
 
+import type * as chat from "../chat.js";
 import type * as chunks from "../chunks.js";
 import type * as folders from "../folders.js";
+import type * as search from "../search.js";
 import type * as summaryActions from "../summaryActions.js";
 import type * as videoActions from "../videoActions.js";
 import type * as videos from "../videos.js";
@@ -21,8 +23,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  chat: typeof chat;
   chunks: typeof chunks;
   folders: typeof folders;
+  search: typeof search;
   summaryActions: typeof summaryActions;
   videoActions: typeof videoActions;
   videos: typeof videos;

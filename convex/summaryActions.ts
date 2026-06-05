@@ -1,10 +1,10 @@
-// No "use node" needed — @google/genai uses standard fetch, which is available
-// in the default Convex V8 runtime.
+// No "use node" needed — @google/genai uses standard fetch,
+// available in the default Convex V8 runtime.
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import { GoogleGenAI } from "@google/genai";
-import { Doc, Id } from "./_generated/dataModel";
+import { Doc } from "./_generated/dataModel";
 
 // ─── Model ───────────────────────────────────────────────────────────────────
 
@@ -17,44 +17,80 @@ function getAI(): GoogleGenAI {
   if (!apiKey) {
     throw new Error(
       "GEMINI_API_KEY is not set. Add it to your Convex environment variables " +
-      "(Dashboard → Settings → Environment Variables)."
+        "(Dashboard → Settings → Environment Variables)."
     );
   }
   return new GoogleGenAI({ apiKey });
 }
 
-/**
- * Summarize one transcript chunk into 2-3 sentences.
- * Thinking disabled for cost efficiency on the map step.
- */
-async function summarizeChunk(ai: GoogleGenAI, text: string): Promise<string> {
-  const prompt =
-    "Summarize the following transcript segment in 2-3 sentences. " +
-    "Focus on the main point being discussed. Be concise and factual. " +
-    "Do not add information not present in the transcript.\n\n" +
-    "Transcript:\n" +
-    text;
-
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      maxOutputTokens: 300,
-    },
-  });
-
-  const result = response.text?.trim();
-  if (!result) throw new Error("Empty response from Gemini on map step");
-  return result;
+/** Determine if an error is a retryable 429 / 503 response. */
+function isRetryable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("429") ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    msg.includes("503") ||
+    msg.includes("UNAVAILABLE")
+  );
 }
 
 /**
- * Synthesize all chunk summaries into structured video insights.
- * Returns a parsed object; throws if Gemini response is not valid JSON.
+ * Call Gemini with exponential backoff.
+ * Retries up to maxAttempts on 429 / 503; re-throws immediately on other errors.
+ *
+ * Back-off schedule: 5s → 20s → 60s (jittered ±10%)
  */
-async function synthesizeInsights(
+async function callWithBackoff(
+  fn: () => Promise<string>,
+  maxAttempts = 3
+): Promise<string> {
+  const delays = [5_000, 20_000, 60_000]; // ms between attempts
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isLast = attempt === maxAttempts - 1;
+      if (isLast || !isRetryable(err)) {
+        throw err;
+      }
+
+      const base = delays[attempt] ?? 60_000;
+      // ±10% jitter to avoid thundering herd
+      const jitter = base * 0.1 * (Math.random() * 2 - 1);
+      const wait = Math.round(base + jitter);
+
+      console.warn(
+        `[summarizeVideo] Gemini attempt ${attempt + 1} failed (retryable). ` +
+          `Waiting ${wait}ms before retry. Error: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+      );
+
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+
+  // TypeScript requires an explicit throw here even though the loop above
+  // always either returns or throws.
+  throw new Error("Unreachable");
+}
+
+/**
+ * Single-pass summarization.
+ *
+ * Concatenates all transcript chunks in chronological order, sends the full
+ * text to Gemini 2.5 Flash in one request, and requests structured JSON
+ * (summary, keyIdeas, mentalModels, quotes).
+ *
+ * Gemini 2.5 Flash has a 1 M-token context window.
+ * A 60-minute video produces roughly 12k tokens of transcript — well within
+ * the limit. This eliminates the N-requests-per-video map-reduce bottleneck
+ * that was causing 429 quota exhaustion.
+ */
+async function generateInsights(
   ai: GoogleGenAI,
-  chunkSummaries: string[]
+  transcriptText: string
 ): Promise<{
   summary: string;
   keyIdeas: string[];
@@ -62,74 +98,94 @@ async function synthesizeInsights(
   quotes: { quote: string; explanation: string }[];
 }> {
   const prompt =
-    "The following are sequential summaries of segments from a YouTube video. " +
-    "Generate a structured analysis of the full video based only on these summaries.\n\n" +
-    "Segment summaries:\n" +
-    chunkSummaries.join("\n\n---\n\n");
+    "You are analyzing a YouTube video transcript. " +
+    "Generate a structured analysis of this video based only on the transcript provided. " +
+    "Do not add information not present in the transcript.\n\n" +
+    "Transcript:\n" +
+    transcriptText;
 
-  const response = await ai.models.generateContent({
-    model: MODEL,
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "object",
-        properties: {
-          summary: {
-            type: "string",
-            description: "3-4 sentence overall summary of the video",
-          },
-          keyIdeas: {
-            type: "array",
-            items: { type: "string" },
-            description: "3-5 key ideas from the video",
-          },
-          mentalModels: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                explanation: { type: "string" },
-              },
-              required: ["name", "explanation"],
+  const raw = await callWithBackoff(async () => {
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            summary: {
+              type: "string",
+              description:
+                "3-4 sentence overall summary of what the video is about",
             },
-            description: "Mental models or frameworks discussed",
-          },
-          quotes: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                quote: { type: "string" },
-                explanation: { type: "string" },
-              },
-              required: ["quote", "explanation"],
+            keyIdeas: {
+              type: "array",
+              items: { type: "string" },
+              description: "3-5 key ideas or takeaways from the video",
             },
-            description: "Notable quotes or statements from the video",
+            mentalModels: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  explanation: { type: "string" },
+                },
+                required: ["name", "explanation"],
+              },
+              description:
+                "Mental models, frameworks, or conceptual tools discussed",
+            },
+            quotes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  quote: { type: "string" },
+                  explanation: { type: "string" },
+                },
+                required: ["quote", "explanation"],
+              },
+              description: "Notable quotes or statements from the video",
+            },
           },
+          required: ["summary", "keyIdeas", "mentalModels", "quotes"],
         },
-        required: ["summary", "keyIdeas", "mentalModels", "quotes"],
+        maxOutputTokens: 2000,
       },
-      maxOutputTokens: 2000,
-    },
+    });
+
+    const text = response.text?.trim();
+    if (!text) throw new Error("Empty response from Gemini");
+    return text;
   });
 
-  const raw = response.text?.trim();
-  if (!raw) throw new Error("Empty response from Gemini on reduce step");
-
-  const parsed = JSON.parse(raw) as {
-    summary: string;
-    keyIdeas: string[];
-    mentalModels: { name: string; explanation: string }[];
-    quotes: { quote: string; explanation: string }[];
+  // Parse and validate — surface a clear error if Gemini returns malformed JSON
+  let parsed: {
+    summary?: string;
+    keyIdeas?: unknown;
+    mentalModels?: unknown;
+    quotes?: unknown;
   };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new Error(
+      `Gemini returned invalid JSON. Raw response (first 500 chars): ${raw.slice(0, 500)}`
+    );
+  }
 
   return {
-    summary: parsed.summary ?? "",
-    keyIdeas: Array.isArray(parsed.keyIdeas) ? parsed.keyIdeas : [],
-    mentalModels: Array.isArray(parsed.mentalModels) ? parsed.mentalModels : [],
-    quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
+    summary: typeof parsed.summary === "string" ? parsed.summary : "",
+    keyIdeas: Array.isArray(parsed.keyIdeas)
+      ? (parsed.keyIdeas as string[])
+      : [],
+    mentalModels: Array.isArray(parsed.mentalModels)
+      ? (parsed.mentalModels as { name: string; explanation: string }[])
+      : [],
+    quotes: Array.isArray(parsed.quotes)
+      ? (parsed.quotes as { quote: string; explanation: string }[])
+      : [],
   };
 }
 
@@ -140,97 +196,53 @@ export const summarizeVideo = internalAction({
   handler: async (ctx, args): Promise<void> => {
     const ai = getAI(); // throws early if API key missing
 
-    // ── Idempotency guard ──────────────────────────────────────────────────
-    // If the video already has a summary (e.g. action was retried after
-    // a transient crash), skip to avoid duplicate Gemini calls.
+    // ── Idempotency guard ────────────────────────────────────────────────────
+    // If the video already has a summary (e.g. action was retried after a
+    // transient crash before the status was flipped), skip to avoid double
+    // billing.
     const video = (await ctx.runQuery(api.videos.getVideoById, {
       videoId: args.videoId,
     })) as Doc<"videos"> | null;
 
     if (!video) {
-      console.error(`[summarizeVideo] Video ${args.videoId} not found. Aborting.`);
+      console.error(
+        `[summarizeVideo] Video ${args.videoId} not found. Aborting.`
+      );
       return;
     }
 
     if (video.summary) {
-      console.log(`[summarizeVideo] Video ${args.videoId} already summarized. Skipping.`);
+      console.log(
+        `[summarizeVideo] Video ${args.videoId} already summarized. Skipping.`
+      );
       return;
     }
 
-    // ── Set status → summarizing ───────────────────────────────────────────
-    await ctx.runMutation(api.videos.updateVideoStatus, {
-      videoId: args.videoId,
-      status: "summarizing",
-    });
+    // ── Fetch all chunks in chronological order ──────────────────────────────
+    const chunks = (await ctx.runQuery(
+      internal.videos.getChunksForSummarization,
+      { videoId: args.videoId }
+    )) as Doc<"transcriptChunks">[];
 
+    if (chunks.length === 0) {
+      console.error(
+        `[summarizeVideo] No transcript chunks found for video ${args.videoId}. Marking failed.`
+      );
+      await ctx.runMutation(api.videos.updateVideoStatus, {
+        videoId: args.videoId,
+        status: "failed",
+      });
+      return;
+    }
+
+    // Concatenate chunks in sequence order (already ordered asc by the query)
+    const transcriptText = chunks.map((c) => c.text).join("\n\n");
+
+    // ── Single Gemini call with exponential backoff ──────────────────────────
     try {
-      // ── Fetch all chunks ─────────────────────────────────────────────────
-      const chunks = (await ctx.runQuery(
-        internal.videos.getChunksForSummarization,
-        { videoId: args.videoId }
-      )) as Doc<"transcriptChunks">[];
+      const insights = await generateInsights(ai, transcriptText);
 
-      if (chunks.length === 0) {
-        throw new Error("No transcript chunks found for this video");
-      }
-
-      // ── MAP: summarize each chunk (skip already-summarized) ───────────────
-      let successCount = 0;
-
-      for (const chunk of chunks) {
-        // Idempotency: skip chunks that already have a summary
-        if (chunk.chunkSummary) {
-          successCount++;
-          continue;
-        }
-
-        let chunkSummary: string | null = null;
-
-        // One retry on failure
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            chunkSummary = await summarizeChunk(ai, chunk.text);
-            break;
-          } catch (err) {
-            console.warn(
-              `[summarizeVideo] Chunk ${chunk.sequence} attempt ${attempt + 1} failed:`,
-              err instanceof Error ? err.message : String(err)
-            );
-          }
-        }
-
-        if (chunkSummary) {
-          await ctx.runMutation(internal.videos.saveChunkSummary, {
-            chunkId: chunk._id as Id<"transcriptChunks">,
-            chunkSummary,
-          });
-          successCount++;
-        } else {
-          console.error(
-            `[summarizeVideo] Chunk ${chunk.sequence} permanently failed — skipping.`
-          );
-        }
-      }
-
-      // ── Guard: at least one chunk must have succeeded ─────────────────────
-      if (successCount === 0) {
-        throw new Error("All chunk summarizations failed — no summaries available for synthesis");
-      }
-
-      // ── Re-fetch chunks to get saved summaries ────────────────────────────
-      const updatedChunks = (await ctx.runQuery(
-        internal.videos.getChunksForSummarization,
-        { videoId: args.videoId }
-      )) as Doc<"transcriptChunks">[];
-
-      const chunkSummaries = updatedChunks
-        .filter((c) => Boolean(c.chunkSummary))
-        .map((c) => c.chunkSummary as string);
-
-      // ── REDUCE: synthesize all chunk summaries → video insights ───────────
-      const insights = await synthesizeInsights(ai, chunkSummaries);
-
-      // ── Save insights (atomic — single patch, sets status: "completed") ───
+      // Atomic: save all insights and flip status to "completed" in one patch
       await ctx.runMutation(internal.videos.saveInsights, {
         videoId: args.videoId,
         summary: insights.summary,
@@ -240,14 +252,13 @@ export const summarizeVideo = internalAction({
       });
 
       console.log(
-        `[summarizeVideo] ✓ Video ${args.videoId} summarized. ` +
-        `Chunks: ${chunks.length}, succeeded: ${successCount}.`
+        `[summarizeVideo] ✓ Video ${args.videoId} summarized in a single pass. ` +
+          `Chunks concatenated: ${chunks.length}.`
       );
     } catch (error) {
-      // Failure: preserve chunk summaries written so far, mark video failed.
-      // The insight fields are NOT touched — video record remains clean.
+      // The insight fields are never written on failure — video record stays clean.
       console.error(
-        `[summarizeVideo] ✗ Failed for video ${args.videoId}:`,
+        `[summarizeVideo] ✗ Failed for video ${args.videoId} after retries:`,
         error instanceof Error ? error.message : String(error)
       );
       await ctx.runMutation(api.videos.updateVideoStatus, {
