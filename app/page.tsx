@@ -116,10 +116,12 @@ function VideoCard({ video }: { video: Doc<"videos"> }) {
               ? "bg-green-100 text-green-800"
               : video.status === "failed"
                 ? "bg-red-100 text-red-800"
-                : "bg-yellow-100 text-yellow-800"
+                : video.status === "summarizing"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-yellow-100 text-yellow-800"
           }`}
         >
-          {video.status}
+          {video.status === "summarizing" ? "summarizing…" : video.status}
         </span>
       </div>
     </div>
@@ -136,6 +138,7 @@ function IngestForm() {
   const insertDraftVideo = useMutation(api.videos.insertDraftVideo);
   const insertChunks = useMutation(api.videos.insertChunks);
   const updateVideoStatus = useMutation(api.videos.updateVideoStatus);
+  const scheduleSummarization = useMutation(api.videos.scheduleSummarization);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,7 +176,10 @@ function IngestForm() {
 
       const chunks = chunkTranscriptSegments(segments);
       await insertChunks({ videoId: convexVideoId, chunks });
-      await updateVideoStatus({ videoId: convexVideoId, status: "completed" });
+      // Transition to summarizing — "completed" is only set by saveInsights after Gemini finishes
+      await updateVideoStatus({ videoId: convexVideoId, status: "summarizing" });
+      // Fire summarization asynchronously — browser does not wait for it
+      await scheduleSummarization({ videoId: convexVideoId });
 
       setUrl("");
     } catch (error) {

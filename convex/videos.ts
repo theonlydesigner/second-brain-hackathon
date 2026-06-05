@@ -1,6 +1,7 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,17 @@ export const getUnfolderedVideos = query({
   },
 });
 
+// Internal query used by the summarization action to fetch all chunks
+export const getChunksForSummarization = internalQuery({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args): Promise<Doc<"transcriptChunks">[]> => {
+    return await ctx.db
+      .query("transcriptChunks")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .order("asc")
+      .collect();
+  },
+});
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
@@ -76,6 +88,7 @@ export const updateVideoStatus = mutation({
     videoId: v.id("videos"),
     status: v.union(
       v.literal("ingesting"),
+      v.literal("summarizing"),
       v.literal("completed"),
       v.literal("failed")
     ),
@@ -108,5 +121,53 @@ export const insertChunks = mutation({
         text: chunk.text,
       });
     }
+  },
+});
+
+// Called by the map step — saves a single chunk's summary
+export const saveChunkSummary = internalMutation({
+  args: {
+    chunkId: v.id("transcriptChunks"),
+    chunkSummary: v.string(),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    await ctx.db.patch(args.chunkId, { chunkSummary: args.chunkSummary });
+  },
+});
+
+// Called by the reduce step — atomically saves all insights + flips status to completed
+export const saveInsights = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    summary: v.string(),
+    keyIdeas: v.array(v.string()),
+    mentalModels: v.array(
+      v.object({ name: v.string(), explanation: v.string() })
+    ),
+    quotes: v.array(
+      v.object({ quote: v.string(), explanation: v.string() })
+    ),
+  },
+  handler: async (ctx, args): Promise<void> => {
+    await ctx.db.patch(args.videoId, {
+      summary: args.summary,
+      keyIdeas: args.keyIdeas,
+      mentalModels: args.mentalModels,
+      quotes: args.quotes,
+      status: "completed",
+    });
+  },
+});
+
+// Public mutation — browser fires this to schedule async summarization.
+// Uses scheduler so the browser never waits for Gemini.
+export const scheduleSummarization = mutation({
+  args: { videoId: v.id("videos") },
+  handler: async (ctx, args): Promise<void> => {
+    await ctx.scheduler.runAfter(
+      0,
+      internal.summaryActions.summarizeVideo,
+      { videoId: args.videoId }
+    );
   },
 });

@@ -16,9 +16,11 @@ export default defineSchema({
     folderId: v.optional(v.id("folders")),
     status: v.union(
       v.literal("ingesting"),
+      v.literal("summarizing"),
       v.literal("completed"),
       v.literal("failed")
     ),
+
 
     // Populated by Gemini (Day 2+)
     summary: v.optional(v.string()),

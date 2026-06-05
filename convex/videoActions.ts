@@ -61,11 +61,13 @@ export const ingestVideo = action({
       // 6. Persist chunks to Convex
       await ctx.runMutation(api.videos.insertChunks, { videoId, chunks });
 
-      // 7. Mark video as completed
+      // 7. Transition to summarizing and schedule Gemini processing.
+      //    "completed" is only set inside saveInsights after the reduce step succeeds.
       await ctx.runMutation(api.videos.updateVideoStatus, {
         videoId,
-        status: "completed",
+        status: "summarizing",
       });
+      await ctx.runMutation(api.videos.scheduleSummarization, { videoId });
 
       return videoId;
     } catch (error) {
