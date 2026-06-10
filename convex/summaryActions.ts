@@ -78,13 +78,21 @@ Ensure that "keyIdeas", "mentalModels", and "quotes" are also richly populated b
     throw e;
   }
 
+  console.log(`[AI] Raw response (first 2000 chars):`, raw.slice(0, 2000));
+  console.log(`[AI] Response length:`, raw.length);
+
   let parsed: any;
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(
-      `AI returned invalid JSON (likely truncated). Raw response (first 500 chars): ${raw.slice(0, 500)}`
-    );
+    let cleanRaw = raw.trim();
+    if (cleanRaw.startsWith("```json")) cleanRaw = cleanRaw.replace(/^```json\n?/, "");
+    if (cleanRaw.startsWith("```")) cleanRaw = cleanRaw.replace(/^```\n?/, "");
+    if (cleanRaw.endsWith("```")) cleanRaw = cleanRaw.replace(/\n?```$/, "");
+    
+    parsed = JSON.parse(cleanRaw);
+  } catch (err) {
+    console.error("[AI] JSON parse failed:", err);
+    console.error("[AI] Raw response:", raw);
+    throw err;
   }
 
   return {
