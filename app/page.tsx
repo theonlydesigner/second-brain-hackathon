@@ -11,6 +11,47 @@ import { useMode } from "./providers";
 import MoveToModal from "./components/MoveToModal";
 import { toast } from "sonner";
 
+// ─── Client Fallback Transcript Fetcher ───────────────────────────────────────
+async function fetchClientFallbackTranscript(videoId: string) {
+  const url = `https://youtube-transcript.ai/transcript/${videoId}.txt`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Client fallback failed (HTTP ${res.status})`);
+  
+  const text = await res.text();
+  const lines = text.split("\n");
+  const segments: any[] = [];
+  let inTranscriptSection = false;
+  
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "## Transcript") {
+      inTranscriptSection = true;
+      continue;
+    }
+    if (trimmed.startsWith("---") && inTranscriptSection) break;
+    
+    if (inTranscriptSection && trimmed) {
+      const match = trimmed.match(/^\[(?:(\d+):)?(\d+):(\d{2})\]\s*(.*)$/);
+      if (match) {
+        const hours = match[1] ? parseInt(match[1], 10) : 0;
+        const minutes = parseInt(match[2], 10);
+        const seconds = parseInt(match[3], 10);
+        const content = match[4].trim();
+        const offset = ((hours * 60 + minutes) * 60 + seconds) * 1000;
+        segments.push({ text: content, offset, duration: 0 });
+      }
+    }
+  }
+  
+  if (segments.length === 0) throw new Error("No segments parsed from client fallback");
+  
+  for (let i = 0; i < segments.length - 1; i++) {
+    segments[i].duration = segments[i + 1].offset - segments[i].offset;
+  }
+  segments[segments.length - 1].duration = 5000;
+  return segments;
+}
+
 // ─── Create Folder Modal ──────────────────────────────────────────────────────
 
 function CreateFolderModal({
@@ -295,7 +336,16 @@ function IngestForm() {
       }
 
       const data = (await res.json()) as TranscriptResponse;
-      const { segments, title, author, thumbnailUrl } = data;
+      let { segments, title, author, thumbnailUrl } = data;
+      
+      if (!segments || segments.length === 0) {
+        try {
+          segments = await fetchClientFallbackTranscript(youtubeId);
+        } catch (e) {
+          throw new Error("Transcript is disabled or unavailable for this video.");
+        }
+      }
+
       if (!segments?.length) throw new Error("No transcript returned");
 
       convexVideoId = await insertDraftVideo({

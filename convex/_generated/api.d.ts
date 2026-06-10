@@ -18,6 +18,7 @@ import type * as search from "../search.js";
 import type * as summaryActions from "../summaryActions.js";
 import type * as tempStats from "../tempStats.js";
 import type * as testLoad from "../testLoad.js";
+import type * as testTranscript from "../testTranscript.js";
 import type * as trigger from "../trigger.js";
 import type * as videoActions from "../videoActions.js";
 import type * as videos from "../videos.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   summaryActions: typeof summaryActions;
   tempStats: typeof tempStats;
   testLoad: typeof testLoad;
+  testTranscript: typeof testTranscript;
   trigger: typeof trigger;
   videoActions: typeof videoActions;
   videos: typeof videos;
