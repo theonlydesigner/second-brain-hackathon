@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { YoutubeTranscript } from "youtube-transcript";
+import { YoutubeTranscript } from "@danielxceron/youtube-transcript";
 
 export interface TranscriptSegment {
   text: string;
