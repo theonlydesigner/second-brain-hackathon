@@ -1,37 +1,42 @@
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
-import { GoogleGenAI } from "@google/genai";
 import { Doc, Id } from "./_generated/dataModel";
-
-const MODEL = "gemini-2.5-flash";
-
-function getAI(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY is not set. Add it to your Convex environment variables."
-    );
-  }
-  return new GoogleGenAI({ apiKey });
-}
+import { generateWithFallback } from "./lib/openrouter";
 
 export const getMessages = query({
-  args: { videoId: v.id("videos") },
+  args: { 
+    videoId: v.optional(v.id("videos")),
+    folderId: v.optional(v.id("folders")),
+  },
   handler: async (ctx, args): Promise<Doc<"messages">[]> => {
-    return await ctx.db
-      .query("messages")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .order("asc")
-      .take(50);
+    if (args.videoId) {
+      return await ctx.db
+        .query("messages")
+        .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+        .order("asc")
+        .take(50);
+    } else if (args.folderId) {
+      return await ctx.db
+        .query("messages")
+        .withIndex("by_folder", (q) => q.eq("folderId", args.folderId))
+        .order("asc")
+        .take(50);
+    }
+    return [];
   },
 });
 
 export const saveUserMessage = mutation({
-  args: { videoId: v.id("videos"), text: v.string() },
+  args: { 
+    videoId: v.optional(v.id("videos")), 
+    folderId: v.optional(v.id("folders")), 
+    text: v.string() 
+  },
   handler: async (ctx, args): Promise<Id<"messages">> => {
     return await ctx.db.insert("messages", {
       videoId: args.videoId,
+      folderId: args.folderId,
       sender: "user",
       text: args.text,
       createdAt: Date.now(),
@@ -41,13 +46,15 @@ export const saveUserMessage = mutation({
 
 export const saveAssistantMessage = internalMutation({
   args: {
-    videoId: v.id("videos"),
+    videoId: v.optional(v.id("videos")),
+    folderId: v.optional(v.id("folders")),
     text: v.string(),
     sourceChunkIds: v.array(v.id("transcriptChunks")),
   },
   handler: async (ctx, args): Promise<Id<"messages">> => {
     return await ctx.db.insert("messages", {
       videoId: args.videoId,
+      folderId: args.folderId,
       sender: "assistant",
       text: args.text,
       createdAt: Date.now(),
@@ -63,11 +70,11 @@ export const getChunksByIds = query({
   },
 });
 
+// ─── Video Chat ──────────────────────────────────────────────────────────────
+
 export const answerQuestion = action({
   args: { videoId: v.id("videos"), question: v.string() },
   handler: async (ctx, args) => {
-    const ai = getAI();
-
     // 1. Search top 5 chunks based on question
     const chunks = (await ctx.runQuery(internal.search.searchChunks, {
       videoId: args.videoId,
@@ -75,54 +82,124 @@ export const answerQuestion = action({
       limit: 5,
     })) as Doc<"transcriptChunks">[];
 
-    // 2. Get recent chat history (last 6 messages)
+    // 2. Get recent chat history
     const recentMessages = (await ctx.runQuery(api.chat.getMessages, {
       videoId: args.videoId,
     })) as Doc<"messages">[];
     const history = recentMessages.slice(-6);
 
-    // 3. Construct prompt
-    let prompt = "You are an AI assistant helping users understand a specific video.\n";
-    prompt += "Answer the user's question based ONLY on the provided transcript excerpts.\n";
-    prompt += "Do not use external knowledge. If the answer is not in the excerpts, say:\n";
-    prompt += "\"I couldn't find information about that in this video's transcript.\"\n\n";
+    // 3. Construct message array
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [];
+    
+    let systemPrompt = "You are an AI assistant helping users understand a specific video.\n";
+    systemPrompt += "Answer the user's question based ONLY on the provided transcript excerpts.\n";
+    systemPrompt += "Do not use external knowledge. If the answer is not in the excerpts, say:\n";
+    systemPrompt += "\"I couldn't find information about that in this video's transcript.\"\n\n";
 
-    prompt += "--- TRANSCRIPT EXCERPTS ---\n";
+    systemPrompt += "--- TRANSCRIPT EXCERPTS ---\n";
     if (chunks.length === 0) {
-      prompt += "(No relevant excerpts found for this question)\n\n";
+      systemPrompt += "(No relevant excerpts found for this question)\n\n";
     } else {
       for (const chunk of chunks) {
-        prompt += `[Segment ${chunk.sequence}]\n${chunk.text}\n\n`;
+        systemPrompt += `[Segment ${chunk.sequence}]\n${chunk.text}\n\n`;
       }
     }
+    messages.push({ role: "system", content: systemPrompt });
 
-    if (history.length > 0) {
-      prompt += "--- CONVERSATION HISTORY ---\n";
-      for (const msg of history) {
-        prompt += `${msg.sender === "user" ? "User" : "Assistant"}: ${msg.text}\n`;
-      }
-      prompt += "\n";
+    for (const msg of history) {
+      messages.push({ role: msg.sender as "user" | "assistant", content: msg.text });
     }
 
-    prompt += "--- CURRENT QUESTION ---\n";
-    prompt += `User: ${args.question}\n\n`;
-    prompt += "Answer concisely and directly. Reference specific segments when relevant.";
-
-    // 4. Call Gemini
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: prompt,
-      config: {
-        maxOutputTokens: 1000,
-      },
+    messages.push({ 
+      role: "user", 
+      content: `${args.question}\n\nAnswer concisely and directly. Reference specific segments when relevant.` 
     });
 
-    const answer = response.text?.trim() || "I couldn't generate an answer.";
+    // 4. Call OpenRouter
+    const answerContent = await generateWithFallback(messages, { maxTokens: 2000 });
+    let answer = answerContent.trim() || "I couldn't generate an answer.";
+    
+    // 4b. Safety Guard
+    const answerLower = answer.toLowerCase();
+    const systemLower = systemPrompt.toLowerCase();
+    if ((answerLower.includes("javascript") || answerLower.includes("settimeout") || answerLower.includes("async/await") || answerLower.includes("console.log")) && 
+        !systemLower.includes("javascript") && !systemLower.includes("settimeout") && !systemLower.includes("async/await") && !systemLower.includes("console.log")) {
+      console.warn(`[chat] WARNING: Unrelated topic shift detected! Raw response: ${answerContent}`);
+    }
     const sourceChunkIds = chunks.map((c) => c._id as Id<"transcriptChunks">);
 
     // 5. Save assistant message and source chunks
     await ctx.runMutation(internal.chat.saveAssistantMessage, {
       videoId: args.videoId,
+      text: answer,
+      sourceChunkIds,
+    });
+
+    return { text: answer, sourceChunkIds };
+  },
+});
+
+// ─── Folder Chat ─────────────────────────────────────────────────────────────
+
+export const answerFolderQuestion = action({
+  args: { folderId: v.id("folders"), question: v.string() },
+  handler: async (ctx, args) => {
+    // 1. Search across all videos in the folder using fan-out (top 3 chunks per video)
+    const chunks = (await ctx.runQuery(internal.search.searchFolderChunks, {
+      folderId: args.folderId,
+      question: args.question,
+      limitPerVideo: 3,
+    })) as Doc<"transcriptChunks">[];
+
+    // 2. Get recent folder chat history
+    const recentMessages = (await ctx.runQuery(api.chat.getMessages, {
+      folderId: args.folderId,
+    })) as Doc<"messages">[];
+    const history = recentMessages.slice(-6);
+
+    // 3. Construct message array
+    const messages: { role: "system" | "user" | "assistant"; content: string }[] = [];
+    
+    let systemPrompt = "You are an AI assistant helping users synthesize knowledge across multiple videos in a folder.\n";
+    systemPrompt += "Answer the user's question based ONLY on the provided transcript excerpts from various videos.\n";
+    systemPrompt += "Do not use external knowledge. If the answer is not in the excerpts, say:\n";
+    systemPrompt += "\"I couldn't find information about that across these videos.\"\n\n";
+
+    systemPrompt += "--- TRANSCRIPT EXCERPTS ---\n";
+    if (chunks.length === 0) {
+      systemPrompt += "(No relevant excerpts found for this question)\n\n";
+    } else {
+      for (const chunk of chunks) {
+        systemPrompt += `[Video ID: ${chunk.videoId} | Segment ${chunk.sequence}]\n${chunk.text}\n\n`;
+      }
+    }
+    messages.push({ role: "system", content: systemPrompt });
+
+    for (const msg of history) {
+      messages.push({ role: msg.sender as "user" | "assistant", content: msg.text });
+    }
+
+    messages.push({ 
+      role: "user", 
+      content: `${args.question}\n\nAnswer concisely and directly. Synthesize the insights if multiple videos mention the topic.` 
+    });
+
+    // 4. Call OpenRouter
+    const answerContent = await generateWithFallback(messages, { maxTokens: 4000 });
+    let answer = answerContent.trim() || "I couldn't generate an answer.";
+    
+    // 4b. Safety Guard
+    const answerLower = answer.toLowerCase();
+    const systemLower = systemPrompt.toLowerCase();
+    if ((answerLower.includes("javascript") || answerLower.includes("settimeout") || answerLower.includes("async/await") || answerLower.includes("console.log")) && 
+        !systemLower.includes("javascript") && !systemLower.includes("settimeout") && !systemLower.includes("async/await") && !systemLower.includes("console.log")) {
+      console.warn(`[chat] WARNING: Unrelated topic shift detected! Raw response: ${answerContent}`);
+    }
+    const sourceChunkIds = chunks.map((c) => c._id as Id<"transcriptChunks">);
+
+    // 5. Save assistant message and source chunks
+    await ctx.runMutation(internal.chat.saveAssistantMessage, {
+      folderId: args.folderId,
       text: answer,
       sourceChunkIds,
     });

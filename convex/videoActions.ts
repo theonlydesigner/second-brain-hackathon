@@ -1,6 +1,6 @@
 import { action } from "./_generated/server";
 import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { extractYoutubeVideoId, fetchYoutubeMetadata, chunkTranscriptSegments } from "../lib/youtube";
 import { Id } from "./_generated/dataModel";
 
@@ -61,13 +61,12 @@ export const ingestVideo = action({
       // 6. Persist chunks to Convex
       await ctx.runMutation(api.videos.insertChunks, { videoId, chunks });
 
-      // 7. Transition to summarizing and schedule Gemini processing.
-      //    "completed" is only set inside saveInsights after the reduce step succeeds.
+      // 7. Transition to queued and schedule queue consumer
       await ctx.runMutation(api.videos.updateVideoStatus, {
         videoId,
-        status: "summarizing",
+        status: "queued",
       });
-      await ctx.runMutation(api.videos.scheduleSummarization, { videoId });
+      await ctx.runMutation(internal.videos.attemptStartNextVideo);
 
       return videoId;
     } catch (error) {

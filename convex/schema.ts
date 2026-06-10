@@ -16,6 +16,7 @@ export default defineSchema({
     folderId: v.optional(v.id("folders")),
     status: v.union(
       v.literal("ingesting"),
+      v.literal("queued"),
       v.literal("summarizing"),
       v.literal("completed"),
       v.literal("failed")
@@ -33,7 +34,8 @@ export default defineSchema({
     ),
   })
     .index("by_folder", ["folderId"])
-    .index("by_youtube_id", ["youtubeId"]),
+    .index("by_youtube_id", ["youtubeId"])
+    .index("by_status", ["status"]),
 
   transcriptChunks: defineTable({
     videoId: v.id("videos"),
@@ -50,10 +52,13 @@ export default defineSchema({
     }),
 
   messages: defineTable({
-    videoId: v.id("videos"),
+    videoId: v.optional(v.id("videos")),
+    folderId: v.optional(v.id("folders")),
     sender: v.union(v.literal("user"), v.literal("assistant")),
     text: v.string(),
     createdAt: v.number(),
     sourceChunkIds: v.optional(v.array(v.id("transcriptChunks"))),
-  }).index("by_video", ["videoId"]),
+  })
+    .index("by_video", ["videoId"])
+    .index("by_folder", ["folderId"]),
 });

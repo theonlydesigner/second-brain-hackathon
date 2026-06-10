@@ -98,6 +98,7 @@ export const updateVideoStatus = mutation({
     videoId: v.id("videos"),
     status: v.union(
       v.literal("ingesting"),
+      v.literal("queued"),
       v.literal("summarizing"),
       v.literal("completed"),
       v.literal("failed")
@@ -167,16 +168,48 @@ export const saveInsights = internalMutation({
 });
 
 /**
- * Public mutation — browser fires this to schedule async summarization.
- * Uses scheduler so the browser never waits for Gemini.
+ * Background consumer that pulls the next video off the queue
+ * if concurrency limit (< 2) is met.
+ */
+export const attemptStartNextVideo = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<void> => {
+    // 1. Check current concurrency limit
+    const summarizingVideos = await ctx.db
+      .query("videos")
+      .withIndex("by_status", (q) => q.eq("status", "summarizing"))
+      .collect();
+
+    if (summarizingVideos.length >= 2) {
+      return;
+    }
+
+    // 2. Fetch oldest queued video
+    const nextVideo = await ctx.db
+      .query("videos")
+      .withIndex("by_status", (q) => q.eq("status", "queued"))
+      .order("asc")
+      .first();
+
+    if (nextVideo) {
+      // 3. Mark summarizing and schedule action
+      await ctx.db.patch(nextVideo._id, { status: "summarizing" });
+      await ctx.scheduler.runAfter(
+        0,
+        internal.summaryActions.summarizeVideo,
+        { videoId: nextVideo._id }
+      );
+    }
+  },
+});
+
+/**
+ * Public mutation — browser fires this to trigger the queue processing.
  */
 export const scheduleSummarization = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args): Promise<void> => {
-    await ctx.scheduler.runAfter(
-      0,
-      internal.summaryActions.summarizeVideo,
-      { videoId: args.videoId }
-    );
+    // Trigger the queue processor. It will pick up the next queued video.
+    await ctx.scheduler.runAfter(0, internal.videos.attemptStartNextVideo);
   },
 });
