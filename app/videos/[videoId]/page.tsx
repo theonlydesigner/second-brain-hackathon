@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Doc, Id } from "@/convex/_generated/dataModel";
 import ReactMarkdown from "react-markdown";
+import { useMode } from "../../providers";
 
 // ─── Source Chunk Component ───────────────────────────────────────────────────
 
@@ -110,7 +111,9 @@ function AssistantMessage({ msg }: { msg: Doc<"messages"> }) {
 
 export default function VideoPage() {
   const params = useParams();
+  const router = useRouter();
   const videoId = params.videoId as Id<"videos">;
+  const { mode } = useMode();
 
   const video = useQuery(api.videos.getVideoById, { videoId });
   const messages = useQuery(api.chat.getMessages, { videoId });
@@ -121,6 +124,12 @@ export default function VideoPage() {
   const [isLoading, setIsLoading] = useState(false);
   
   const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (video && (video.mode ?? "personal") !== mode) {
+      router.push("/");
+    }
+  }, [video, mode, router]);
 
   useEffect(() => {
     if (chatContainerRef.current) {

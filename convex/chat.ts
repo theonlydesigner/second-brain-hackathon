@@ -31,15 +31,27 @@ export const saveUserMessage = mutation({
   args: { 
     videoId: v.optional(v.id("videos")), 
     folderId: v.optional(v.id("folders")), 
-    text: v.string() 
+    text: v.string(),
+    mode: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"messages">> => {
+    let mode = args.mode;
+    if (!mode) {
+      if (args.videoId) {
+        const video = await ctx.db.get(args.videoId);
+        if (video) mode = video.mode;
+      } else if (args.folderId) {
+        const folder = await ctx.db.get(args.folderId);
+        if (folder) mode = folder.mode;
+      }
+    }
     return await ctx.db.insert("messages", {
       videoId: args.videoId,
       folderId: args.folderId,
       sender: "user",
       text: args.text,
       createdAt: Date.now(),
+      mode: mode ?? "personal",
     });
   },
 });
@@ -50,8 +62,19 @@ export const saveAssistantMessage = internalMutation({
     folderId: v.optional(v.id("folders")),
     text: v.string(),
     sourceChunkIds: v.array(v.id("transcriptChunks")),
+    mode: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"messages">> => {
+    let mode = args.mode;
+    if (!mode) {
+      if (args.videoId) {
+        const video = await ctx.db.get(args.videoId);
+        if (video) mode = video.mode;
+      } else if (args.folderId) {
+        const folder = await ctx.db.get(args.folderId);
+        if (folder) mode = folder.mode;
+      }
+    }
     return await ctx.db.insert("messages", {
       videoId: args.videoId,
       folderId: args.folderId,
@@ -59,6 +82,7 @@ export const saveAssistantMessage = internalMutation({
       text: args.text,
       createdAt: Date.now(),
       sourceChunkIds: args.sourceChunkIds,
+      mode: mode ?? "personal",
     });
   },
 });

@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Doc, Id } from "@/convex/_generated/dataModel";
 import { extractYoutubeVideoId, chunkTranscriptSegments } from "@/lib/youtube";
 import type { TranscriptResponse } from "./api/transcript/route";
+import { useMode } from "./providers";
+import MoveToModal from "./components/MoveToModal";
+import { toast } from "sonner";
 
 // ─── Create Folder Modal ──────────────────────────────────────────────────────
 
@@ -17,6 +20,7 @@ function CreateFolderModal({
 }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const { mode } = useMode();
   const createFolder = useMutation(api.folders.createFolder);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -24,7 +28,7 @@ function CreateFolderModal({
     if (!name.trim()) return;
     setBusy(true);
     try {
-      await createFolder({ name: name.trim() });
+      await createFolder({ name: name.trim(), mode });
       onClose();
     } finally {
       setBusy(false);
@@ -100,43 +104,157 @@ function FolderCard({
   );
 }
 
-// ─── Video Card ───────────────────────────────────────────────────────────────
+// ─── Delete Confirmation Modal ─────────────────────────────────────────────────
 
-function VideoCard({ video }: { video: Doc<"videos"> }) {
+function DeleteConfirmModal({
+  title,
+  isOpen,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!isOpen) return null;
   return (
-    <Link href={`/videos/${video._id}`} className="group flex flex-col bg-zinc-900/50 border border-zinc-800/80 rounded-2xl overflow-hidden transition-all hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg">
-      <div className="relative aspect-video bg-zinc-950 overflow-hidden border-b border-zinc-800/50">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={video.thumbnailUrl}
-          alt={video.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 group-hover:opacity-100"
-        />
-        <div className="absolute inset-0 bg-black/10 transition-colors group-hover:bg-black/0" />
-      </div>
-      <div className="p-4 flex flex-col flex-1 gap-2">
-        <h3 className="font-semibold text-[15px] leading-snug text-zinc-100 line-clamp-2 group-hover:text-white transition-colors">{video.title}</h3>
-        <p className="text-[13px] text-zinc-400 line-clamp-1">{video.description}</p>
-        
-        <div className="mt-auto pt-3 flex justify-between items-center">
-          <span
-            className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md ${
-              video.status === "completed"
-                ? "bg-zinc-800 text-zinc-300"
-                : video.status === "failed"
-                  ? "bg-red-950/50 text-red-400"
-                  : video.status === "summarizing"
-                    ? "bg-amber-950/50 text-amber-400"
-                    : video.status === "queued"
-                      ? "bg-purple-950/50 text-purple-400"
-                      : "bg-zinc-800/50 text-zinc-400"
-            }`}
+    <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-zinc-800 animate-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+        <div className="w-10 h-10 rounded-full bg-red-950/50 border border-red-900/50 flex items-center justify-center mb-4">
+          <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 className="text-base font-bold text-zinc-50 mb-1">Delete Video?</h3>
+        <p className="text-[13px] text-zinc-400 leading-relaxed mb-5">
+          This will permanently delete <span className="font-semibold text-zinc-300">"{title}"</span>, including transcripts, summaries, and chat history. This action cannot be undone.
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-[13px] font-medium rounded-xl border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 transition-colors"
           >
-            {video.status === "summarizing" ? "summarizing…" : video.status === "queued" ? "queued…" : video.status}
-          </span>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="px-4 py-2 text-[13px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white transition-colors shadow-md"
+          >
+            Delete
+          </button>
         </div>
       </div>
-    </Link>
+    </div>
+  );
+}
+
+// ─── Video Card ───────────────────────────────────────────────────────────────
+
+function VideoCard({ video, onDelete, onMoveTo }: { video: Doc<"videos">; onDelete: () => void; onMoveTo: () => void }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative group flex flex-col bg-zinc-900/50 border border-zinc-800/80 rounded-2xl overflow-hidden transition-all hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg">
+      <Link href={`/videos/${video._id}`} className="flex-1 flex flex-col">
+        <div className="relative aspect-video bg-zinc-950 overflow-hidden border-b border-zinc-800/50">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={video.thumbnailUrl}
+            alt={video.title}
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 group-hover:opacity-100"
+          />
+          <div className="absolute inset-0 bg-black/10 transition-colors group-hover:bg-black/0" />
+        </div>
+        <div className="p-4 flex flex-col flex-1 gap-2">
+          <h3 className="font-semibold text-[15px] leading-snug text-zinc-100 line-clamp-2 group-hover:text-white transition-colors pr-6">{video.title}</h3>
+          <p className="text-[13px] text-zinc-400 line-clamp-1">{video.description}</p>
+          
+          <div className="mt-auto pt-3 flex justify-between items-center">
+            <span
+              className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md ${
+                video.status === "completed"
+                  ? "bg-zinc-800 text-zinc-300"
+                  : video.status === "failed"
+                    ? "bg-red-950/50 text-red-400"
+                    : video.status === "summarizing"
+                      ? "bg-amber-950/50 text-amber-400"
+                      : video.status === "queued"
+                        ? "bg-purple-950/50 text-purple-400"
+                        : "bg-zinc-800/50 text-zinc-400"
+              }`}
+            >
+              {video.status === "summarizing" ? "summarizing…" : video.status === "queued" ? "queued…" : video.status}
+            </span>
+          </div>
+        </div>
+      </Link>
+
+      {/* Three Dots Menu */}
+      <div className="absolute top-2 right-2 z-10" ref={menuRef}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuOpen(!menuOpen);
+          }}
+          className="w-7 h-7 rounded-lg bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer shadow"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+          </svg>
+        </button>
+
+        {menuOpen && (
+          <div className="absolute right-0 mt-1 w-36 rounded-xl border border-zinc-800 bg-zinc-900 p-1 shadow-xl z-20">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onMoveTo();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 rounded-lg text-left transition-colors cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              Move To...
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onDelete();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/20 rounded-lg text-left transition-colors cursor-pointer mt-0.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete Video
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -146,6 +264,7 @@ function IngestForm() {
   const [url, setUrl] = useState("");
   const [isIngesting, setIsIngesting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const { mode } = useMode();
 
   const insertDraftVideo = useMutation(api.videos.insertDraftVideo);
   const insertChunks = useMutation(api.videos.insertChunks);
@@ -184,6 +303,7 @@ function IngestForm() {
         title,
         channelName: author,
         thumbnailUrl,
+        mode,
       });
 
       const chunks = chunkTranscriptSegments(segments);
@@ -250,9 +370,14 @@ function IngestForm() {
 
 export default function DashboardPage() {
   const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [deleteTargetVideo, setDeleteTargetVideo] = useState<Doc<"videos"> | null>(null);
+  const [moveTargetVideo, setMoveTargetVideo] = useState<Doc<"videos"> | null>(null);
+  const { mode } = useMode();
+  const deleteVideo = useMutation(api.videos.deleteVideo);
+  const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
 
-  const folders = useQuery(api.folders.getFolders);
-  const allVideos = useQuery(api.videos.getVideos);
+  const folders = useQuery(api.folders.getFolders, { mode });
+  const allVideos = useQuery(api.videos.getVideos, { mode });
 
   // Build a count map: folderId → video count
   const folderVideoCount = new Map<string, number>();
@@ -269,6 +394,32 @@ export default function DashboardPage() {
 
   // Unfoldered = videos with no folderId
   const unfolderedVideos = allVideos?.filter((v) => !v.folderId) ?? [];
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetVideo) return;
+    try {
+      await deleteVideo({ videoId: deleteTargetVideo._id });
+      toast.success("Video deleted");
+    } catch (err) {
+      console.error("Failed to delete video:", err);
+      toast.error("Failed to delete video.");
+    } finally {
+      setDeleteTargetVideo(null);
+    }
+  };
+
+  const handleMoveConfirm = async (folderId: Id<"folders"> | undefined) => {
+    if (!moveTargetVideo) return;
+    try {
+      await moveVideoToFolder({ videoId: moveTargetVideo._id, folderId, mode });
+      toast.success(folderId ? "Moved to folder" : "Moved to unorganized");
+    } catch (err) {
+      console.error("Failed to move video:", err);
+      toast.error("Failed to move video.");
+    } finally {
+      setMoveTargetVideo(null);
+    }
+  };
 
   return (
     <main className="w-full max-w-[1200px] mx-auto px-6 font-sans flex-1 py-8">
@@ -358,7 +509,7 @@ export default function DashboardPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {unfolderedVideos.map((video) => (
-              <VideoCard key={video._id} video={video} />
+              <VideoCard key={video._id} video={video} onDelete={() => setDeleteTargetVideo(video)} onMoveTo={() => setMoveTargetVideo(video)} />
             ))}
           </div>
         )}
@@ -367,6 +518,20 @@ export default function DashboardPage() {
       {showCreateFolder && (
         <CreateFolderModal onClose={() => setShowCreateFolder(false)} />
       )}
+
+      <DeleteConfirmModal
+        title={deleteTargetVideo?.title ?? ""}
+        isOpen={!!deleteTargetVideo}
+        onClose={() => setDeleteTargetVideo(null)}
+        onConfirm={handleDeleteConfirm}
+      />
+      <MoveToModal
+        isOpen={!!moveTargetVideo}
+        onClose={() => setMoveTargetVideo(null)}
+        folders={folders ?? []}
+        currentFolderId={moveTargetVideo?.folderId}
+        onSelectFolder={handleMoveConfirm}
+      />
     </main>
   );
 }

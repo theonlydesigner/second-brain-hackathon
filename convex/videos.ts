@@ -6,9 +6,11 @@ import { internal } from "./_generated/api";
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 export const getVideos = query({
-  args: {},
-  handler: async (ctx): Promise<Doc<"videos">[]> => {
-    return await ctx.db.query("videos").order("desc").take(100);
+  args: { mode: v.optional(v.string()) },
+  handler: async (ctx, args): Promise<Doc<"videos">[]> => {
+    const mode = args.mode ?? "personal";
+    const all = await ctx.db.query("videos").order("desc").collect();
+    return all.filter((v) => (v.mode ?? "personal") === mode).slice(0, 100);
   },
 });
 
@@ -31,13 +33,15 @@ export const getVideosByFolder = query({
 });
 
 export const getUnfolderedVideos = query({
-  args: {},
-  handler: async (ctx): Promise<Doc<"videos">[]> => {
-    return await ctx.db
+  args: { mode: v.optional(v.string()) },
+  handler: async (ctx, args): Promise<Doc<"videos">[]> => {
+    const mode = args.mode ?? "personal";
+    const all = await ctx.db
       .query("videos")
       .withIndex("by_folder", (q) => q.eq("folderId", undefined))
       .order("desc")
       .collect();
+    return all.filter((v) => (v.mode ?? "personal") === mode);
   },
 });
 
@@ -71,15 +75,18 @@ export const insertDraftVideo = mutation({
     title: v.string(),
     thumbnailUrl: v.string(),
     channelName: v.string(),
+    mode: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Doc<"videos">["_id"]> => {
-    // Deduplicate: return existing id if already ingested
+    const mode = args.mode ?? "personal";
+    // Deduplicate: return existing id if already ingested in this mode
     const existing = await ctx.db
       .query("videos")
       .withIndex("by_youtube_id", (q) => q.eq("youtubeId", args.youtubeId))
-      .unique();
-    if (existing) {
-      return existing._id;
+      .collect();
+    const match = existing.find((v) => (v.mode ?? "personal") === mode);
+    if (match) {
+      return match._id;
     }
 
     return await ctx.db.insert("videos", {
@@ -89,6 +96,7 @@ export const insertDraftVideo = mutation({
       thumbnailUrl: args.thumbnailUrl,
       duration: "",
       status: "ingesting",
+      mode,
     });
   },
 });
@@ -211,5 +219,34 @@ export const scheduleSummarization = mutation({
   handler: async (ctx, args): Promise<void> => {
     // Trigger the queue processor. It will pick up the next queued video.
     await ctx.scheduler.runAfter(0, internal.videos.attemptStartNextVideo);
+  },
+});
+
+export const deleteVideo = mutation({
+  args: { videoId: v.id("videos"), mode: v.optional(v.string()) },
+  handler: async (ctx, args): Promise<void> => {
+    const video = await ctx.db.get(args.videoId);
+    if (!video) throw new Error("Video not found");
+
+    // 1. Delete transcript chunks
+    const chunks = await ctx.db
+      .query("transcriptChunks")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    for (const chunk of chunks) {
+      await ctx.db.delete(chunk._id);
+    }
+
+    // 2. Delete messages
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    for (const msg of messages) {
+      await ctx.db.delete(msg._id);
+    }
+
+    // 3. Delete the video itself
+    await ctx.db.delete(args.videoId);
   },
 });

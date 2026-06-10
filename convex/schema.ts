@@ -5,6 +5,7 @@ export default defineSchema({
   folders: defineTable({
     name: v.string(),
     description: v.optional(v.string()),
+    mode: v.optional(v.string()),
   }),
 
   videos: defineTable({
@@ -32,6 +33,7 @@ export default defineSchema({
     quotes: v.optional(
       v.array(v.object({ quote: v.string(), explanation: v.string() }))
     ),
+    mode: v.optional(v.string()),
   })
     .index("by_folder", ["folderId"])
     .index("by_youtube_id", ["youtubeId"])
@@ -58,6 +60,7 @@ export default defineSchema({
     text: v.string(),
     createdAt: v.number(),
     sourceChunkIds: v.optional(v.array(v.id("transcriptChunks"))),
+    mode: v.optional(v.string()),
   })
     .index("by_video", ["videoId"])
     .index("by_folder", ["folderId"]),

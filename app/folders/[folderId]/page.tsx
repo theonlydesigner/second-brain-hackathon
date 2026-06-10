@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Doc, Id } from "@/convex/_generated/dataModel";
 import ReactMarkdown from "react-markdown";
+import { useMode } from "../../providers";
+import MoveToModal from "../../components/MoveToModal";
+import { toast } from "sonner";
 
 // ─── Source Chunk Component ───────────────────────────────────────────────────
 
@@ -108,40 +111,107 @@ function AssistantMessage({ msg }: { msg: Doc<"messages"> }) {
 
 // ─── Video Card Component ─────────────────────────────────────────────────────
 
-function FolderVideoCard({ video }: { video: Doc<"videos"> }) {
+function FolderVideoCard({ video, onDelete, onMoveTo }: { video: Doc<"videos">; onDelete: () => void; onMoveTo: () => void }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
-    <Link href={`/videos/${video._id}`} className="group flex flex-col bg-zinc-900/50 border border-zinc-800/80 rounded-2xl overflow-hidden transition-all hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg">
-      <div className="relative aspect-video bg-zinc-950 overflow-hidden border-b border-zinc-800/50">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={video.thumbnailUrl}
-          alt={video.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 group-hover:opacity-100"
-        />
-        <div className="absolute inset-0 bg-black/10 transition-colors group-hover:bg-black/0" />
-      </div>
-      <div className="p-3 flex flex-col flex-1 gap-1.5">
-        <h3 className="font-semibold text-[14px] leading-snug text-zinc-100 line-clamp-2 group-hover:text-white transition-colors">{video.title}</h3>
-        
-        <div className="mt-auto pt-2 flex justify-between items-center">
-          <span
-            className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md ${
-              video.status === "completed"
-                ? "bg-zinc-800 text-zinc-300"
-                : video.status === "failed"
-                  ? "bg-red-950/50 text-red-400"
-                  : video.status === "summarizing"
-                    ? "bg-amber-950/50 text-amber-400"
-                    : video.status === "queued"
-                      ? "bg-purple-950/50 text-purple-400"
-                      : "bg-zinc-800/50 text-zinc-400"
-            }`}
-          >
-            {video.status === "summarizing" ? "summarizing…" : video.status === "queued" ? "queued…" : video.status}
-          </span>
+    <div className="relative group flex flex-col bg-zinc-900/50 border border-zinc-800/80 rounded-2xl overflow-hidden transition-all hover:bg-zinc-900 hover:border-zinc-700 hover:shadow-lg">
+      <Link href={`/videos/${video._id}`} className="flex-1 flex flex-col">
+        <div className="relative aspect-video bg-zinc-950 overflow-hidden border-b border-zinc-800/50">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={video.thumbnailUrl}
+            alt={video.title}
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 opacity-90 group-hover:opacity-100"
+          />
+          <div className="absolute inset-0 bg-black/10 transition-colors group-hover:bg-black/0" />
         </div>
+        <div className="p-3 flex flex-col flex-1 gap-1.5">
+          <h3 className="font-semibold text-[14px] leading-snug text-zinc-100 line-clamp-2 group-hover:text-white transition-colors pr-6">{video.title}</h3>
+          
+          <div className="mt-auto pt-2 flex justify-between items-center">
+            <span
+              className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md ${
+                video.status === "completed"
+                  ? "bg-zinc-800 text-zinc-300"
+                  : video.status === "failed"
+                    ? "bg-red-950/50 text-red-400"
+                    : video.status === "summarizing"
+                      ? "bg-amber-950/50 text-amber-400"
+                      : video.status === "queued"
+                        ? "bg-purple-950/50 text-purple-400"
+                        : "bg-zinc-800/50 text-zinc-400"
+              }`}
+            >
+              {video.status === "summarizing" ? "summarizing…" : video.status === "queued" ? "queued…" : video.status}
+            </span>
+          </div>
+        </div>
+      </Link>
+
+      {/* Three Dots Menu */}
+      <div className="absolute top-2 right-2 z-10" ref={menuRef}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setMenuOpen(!menuOpen);
+          }}
+          className="w-6 h-6 rounded bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer shadow animate-in fade-in"
+        >
+          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+          </svg>
+        </button>
+
+        {menuOpen && (
+          <div className="absolute right-0 mt-1 w-36 rounded-xl border border-zinc-800 bg-zinc-900 p-1 shadow-xl z-20">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onMoveTo();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 rounded-lg text-left transition-colors cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              Move To...
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen(false);
+                onDelete();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/20 rounded-lg text-left transition-colors cursor-pointer mt-0.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete Video
+            </button>
+          </div>
+        )}
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -280,14 +350,226 @@ function FolderChat({ folderId, videos }: { folderId: Id<"folders">; videos: Doc
   );
 }
 
+// ─── Folder Modals ────────────────────────────────────────────────────────────
+
+function RenameFolderModal({
+  folderId,
+  initialName,
+  isOpen,
+  onClose,
+}: {
+  folderId: Id<"folders">;
+  initialName: string;
+  isOpen: boolean;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [busy, setBusy] = useState(false);
+  const renameFolder = useMutation(api.folders.renameFolder);
+
+  if (!isOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      await renameFolder({ folderId, name: name.trim() });
+      onClose();
+    } catch (err) {
+      console.error("Rename folder failed:", err);
+      alert("Failed to rename folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-zinc-800 animate-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-base font-bold text-zinc-50 mb-4">Rename Folder</h2>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <input
+            type="text"
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Folder name"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-zinc-50 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-700 transition-all font-medium"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-semibold rounded-xl border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !name.trim()}
+              className="px-4 py-2 text-xs font-semibold rounded-xl bg-zinc-50 text-zinc-900 hover:bg-zinc-200 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function DeleteFolderModal({
+  folderName,
+  isOpen,
+  onClose,
+  onConfirm,
+}: {
+  folderName: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-zinc-800 animate-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+        <div className="w-10 h-10 rounded-full bg-red-950/50 border border-red-900/50 flex items-center justify-center mb-4">
+          <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 className="text-base font-bold text-zinc-50 mb-1">Delete Folder?</h3>
+        <p className="text-[13px] text-zinc-400 leading-relaxed mb-4">
+          This will permanently delete the folder <span className="font-semibold text-zinc-300">"{folderName}"</span> and all of its contents:
+        </p>
+        <ul className="text-xs text-zinc-500 space-y-1 mb-5 pl-4 list-disc">
+          <li>all videos</li>
+          <li>transcripts</li>
+          <li>chats</li>
+          <li>summaries</li>
+        </ul>
+        <p className="text-xs text-red-400/80 mb-5">
+          This action cannot be undone.
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-[13px] font-medium rounded-xl border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="px-4 py-2 text-[13px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white transition-colors shadow-md"
+          >
+            Delete Folder
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteVideoConfirmModal({
+  title,
+  isOpen,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-zinc-900 rounded-2xl p-6 w-full max-w-sm shadow-2xl border border-zinc-800 animate-in zoom-in-95 duration-150" onClick={(e) => e.stopPropagation()}>
+        <div className="w-10 h-10 rounded-full bg-red-950/50 border border-red-900/50 flex items-center justify-center mb-4">
+          <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 className="text-base font-bold text-zinc-50 mb-1">Delete Video?</h3>
+        <p className="text-[13px] text-zinc-400 leading-relaxed mb-5">
+          This will permanently delete <span className="font-semibold text-zinc-300">"{title}"</span>, including transcripts, summaries, and chat history. This action cannot be undone.
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-[13px] font-medium rounded-xl border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="px-4 py-2 text-[13px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white transition-colors shadow-md"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Folder Page Component ────────────────────────────────────────────────────
 
 export default function FolderPage() {
   const params = useParams();
+  const router = useRouter();
   const folderId = params.folderId as Id<"folders">;
+  const { mode } = useMode();
 
   const folder = useQuery(api.folders.getFolderById, { folderId });
   const videos = useQuery(api.videos.getVideosByFolder, { folderId });
+  const allFolders = useQuery(api.folders.getFolders, { mode });
+  
+  const deleteFolderMutation = useMutation(api.folders.deleteFolder);
+  const deleteVideoMutation = useMutation(api.videos.deleteVideo);
+  const moveVideoToFolder = useMutation(api.folders.moveVideoToFolder);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteTargetVideo, setDeleteTargetVideo] = useState<Doc<"videos"> | null>(null);
+  const [moveTargetVideo, setMoveTargetVideo] = useState<Doc<"videos"> | null>(null);
+
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (folder && (folder.mode ?? "personal") !== mode) {
+      router.push("/");
+    }
+  }, [folder, mode, router]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleMoveConfirm = async (targetFolderId: Id<"folders"> | undefined) => {
+    if (!moveTargetVideo) return;
+    try {
+      await moveVideoToFolder({ videoId: moveTargetVideo._id, folderId: targetFolderId, mode });
+      toast.success(targetFolderId ? "Moved to folder" : "Moved to unorganized");
+    } catch (err) {
+      console.error("Failed to move video:", err);
+      toast.error("Failed to move video.");
+    } finally {
+      setMoveTargetVideo(null);
+    }
+  };
 
   if (folder === undefined || videos === undefined) {
     return (
@@ -336,10 +618,57 @@ export default function FolderPage() {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
               Back to Dashboard
             </Link>
-            <h1 className="text-3xl font-bold tracking-tight text-zinc-50 flex items-center gap-3">
-              <svg className="w-7 h-7 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
-              {folder.name}
-            </h1>
+            
+            <div className="flex items-center gap-4">
+              <h1 className="text-3xl font-bold tracking-tight text-zinc-50 flex items-center gap-3">
+                <svg className="w-7 h-7 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                {folder.name}
+              </h1>
+              
+              <div className="relative mt-1" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  className="w-8 h-8 rounded-lg bg-zinc-900/50 hover:bg-zinc-800 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer shadow-sm"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
+                  </svg>
+                </button>
+                
+                {menuOpen && (
+                  <div className="absolute left-0 mt-1 w-40 rounded-xl border border-zinc-800 bg-zinc-900 p-1 shadow-xl z-20">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setShowRename(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 rounded-lg text-left transition-colors cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                      Rename Folder
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setShowDelete(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/20 rounded-lg text-left transition-colors cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      Delete Folder
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            
             <p className="text-[14px] text-zinc-400 mt-2">
               {videos.length} {videos.length === 1 ? "video" : "videos"} in this folder
             </p>
@@ -356,7 +685,7 @@ export default function FolderPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {videos.map((video) => (
-                <FolderVideoCard key={video._id} video={video} />
+                <FolderVideoCard key={video._id} video={video} onDelete={() => setDeleteTargetVideo(video)} onMoveTo={() => setMoveTargetVideo(video)} />
               ))}
             </div>
           )}
@@ -367,6 +696,54 @@ export default function FolderPage() {
           <FolderChat folderId={folderId} videos={videos} />
         </div>
       </div>
+
+      <RenameFolderModal
+        folderId={folderId}
+        initialName={folder.name}
+        isOpen={showRename}
+        onClose={() => setShowRename(false)}
+      />
+      
+      <DeleteFolderModal
+        folderName={folder.name}
+        isOpen={showDelete}
+        onClose={() => setShowDelete(false)}
+        onConfirm={async () => {
+          try {
+            await deleteFolderMutation({ folderId });
+            router.push("/");
+          } catch (err) {
+            console.error("Delete folder failed:", err);
+            alert("Failed to delete folder.");
+          }
+        }}
+      />
+      
+      <DeleteVideoConfirmModal
+        title={deleteTargetVideo?.title ?? ""}
+        isOpen={!!deleteTargetVideo}
+        onClose={() => setDeleteTargetVideo(null)}
+        onConfirm={async () => {
+          if (!deleteTargetVideo) return;
+          try {
+            await deleteVideoMutation({ videoId: deleteTargetVideo._id });
+            toast.success("Video deleted");
+          } catch (err) {
+            console.error("Delete video failed:", err);
+            toast.error("Failed to delete video.");
+          } finally {
+            setDeleteTargetVideo(null);
+          }
+        }}
+      />
+      
+      <MoveToModal
+        isOpen={!!moveTargetVideo}
+        onClose={() => setMoveTargetVideo(null)}
+        folders={allFolders ?? []}
+        currentFolderId={moveTargetVideo?.folderId}
+        onSelectFolder={handleMoveConfirm}
+      />
     </main>
   );
 }
