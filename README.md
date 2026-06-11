@@ -1,121 +1,257 @@
 # Second Brain
 
-Turn YouTube videos into a searchable AI knowledge base.
+Second Brain is a YouTube-first knowledge base that helps you remember and retrieve things from videos you've already watched.
 
----
+The idea came from a simple problem:
 
-## The Problem
+I consume a lot of long-form content — podcasts, startup interviews, lectures, tutorials — and a few weeks later I remember almost none of the useful details.
 
-You watch hundreds of hours of YouTube — lectures, interviews, startup advice, deep dives. A week later, you can barely recall what was in them.
+I didn't want another bookmarking tool.
 
-The problem is not access to information. It is retrieval.
+I wanted something that could answer:
 
-Second Brain converts passive consumption into a personal knowledge system you can actually query.
+> "What did that founder say about hiring?"
+
+without making me rewatch a 2-hour podcast.
+
+So I built Second Brain.
 
 ---
 
 ## What It Does
 
-**Save a video** — paste any YouTube URL and Second Brain extracts the transcript, chunks it, and stores it.
+### Save YouTube Videos
 
-**Generate insights** — every video gets an AI-generated summary, key ideas, mental models, and notable quotes.
+Paste a YouTube URL and Second Brain:
 
-**Chat with a video** — ask questions about a specific video and get answers with timestamp citations showing exactly where in the video the answer came from.
-
-**Organize into folders** — group related videos into knowledge folders (e.g. "Startups", "Machine Learning", "Investing").
-
-**Chat across folders** — ask questions that span your entire library and get synthesized answers sourced from multiple videos at once.
-
-Instead of:
-> "I remember hearing something about this once..."
-
-You can ask:
-> "What did all my startup videos say about hiring engineers?"
-
-And get an answer in seconds, with sources.
+- Extracts the transcript
+- Breaks it into timestamped chunks
+- Stores everything in a searchable knowledge base
 
 ---
 
-## Features
+### Generate AI Insights
 
-- YouTube transcript extraction and automatic chunking
-- AI-powered summarization (summary, key ideas, mental models, quotes)
-- RAG-powered chat with source attribution and timestamp references
-- Folder organization and cross-folder knowledge discovery
-- Multi-video reasoning and knowledge synthesis
+For every video, Gemini generates:
 
----
+- Summary
+- Key ideas
+- Mental models
+- Notable quotes
 
-## Who It Is For
-
-- **Founders and indie hackers** who learn by consuming content
-- **Students and researchers** who want their study material to be queryable
-- **Knowledge workers** — consultants, PMs, marketers — who process a lot of long-form content
-- **Anyone** who has ever rewatched a video just to find one thing they half-remembered
+This gives a quick overview before diving into the full transcript.
 
 ---
 
-## Demo
+### Chat With a Video
 
-1. Paste a YouTube URL
-2. Transcript is extracted automatically
-3. AI generates insights for the video
-4. Ask a question — get a timestamped, source-backed answer
-5. Add more videos to a folder
-6. Ask a question across the entire folder
-7. Get synthesized knowledge from multiple sources at once
+Ask questions about a specific video.
+
+Examples:
+
+- What did the speaker say about product-market fit?
+- Summarize the hiring advice.
+- What mistakes should founders avoid?
+
+Answers include source citations and timestamps so you can verify exactly where the information came from.
+
+One thing I focused heavily on was reducing hallucinations.
+
+If the answer is not present in the transcript, the AI should say that instead of inventing something.
+
+---
+
+### Organize Videos Into Folders
+
+Videos can be grouped into folders such as:
+
+- Startups
+- Marketing
+- AI
+- Investing
+- Programming
+
+This makes it easier to build topic-specific knowledge collections.
+
+---
+
+### Chat Across Multiple Videos
+
+This is probably my favourite feature.
+
+Instead of querying a single video, you can ask questions across an entire folder.
+
+Example:
+
+> "What do all these startup videos say about hiring engineers?"
+
+Second Brain searches multiple videos, retrieves relevant transcript sections, and generates a combined answer with sources.
+
+---
+
+## Why I Built It
+
+The internet has made information cheap.
+
+Remembering and finding information later is still hard.
+
+Most of us spend hundreds of hours consuming content but have no system for retrieving it when we actually need it.
+
+Second Brain tries to solve that.
+
+Instead of treating videos as content you watch once and forget, it turns them into something you can search, question and learn from repeatedly.
+
+---
+
+## Why Not Just Use NotebookLM?
+
+It's a fair question.
+
+NotebookLM is great and solves a similar problem.
+
+The difference is that Second Brain is designed around a YouTube-first workflow.
+
+A few things I focused on:
+
+- Timestamp-level citations
+- Video-centric knowledge management
+- Folder-based knowledge discovery
+- Cross-video synthesis
+- Fast ingestion directly from YouTube links
+
+The goal isn't to replace NotebookLM.
+
+The goal is to create a lightweight personal knowledge system specifically optimized for video content.
+
+---
+
+## How It Works
+
+1. User submits a YouTube URL
+2. Transcript is extracted
+3. Transcript is chunked with timestamps
+4. Gemini generates insights
+5. Chunks are indexed for retrieval
+6. User asks questions
+7. Relevant chunks are retrieved
+8. Gemini answers using only retrieved context
+9. Sources are attached to the response
 
 ---
 
 ## Tech Stack
 
-> _Update this section with your actual stack_
+### Frontend
 
-- **Frontend:** [e.g. Next.js, React]
-- **Backend:** [e.g. Node.js, FastAPI]
-- **AI:** [e.g. Gemini, OpenAI]
-- **Vector DB:** [e.g. Pinecone, Supabase pgvector]
-- **Transcript:** [e.g. YouTube Data API, yt-dlp]
+- Next.js 15
+- React
+- TypeScript
+- Tailwind CSS
+
+### Backend
+
+- Convex
+
+### AI
+
+- Gemini 2.5 Flash
+- Automatic fallback handling for model availability issues
+
+### Retrieval
+
+- Convex Full-Text Search
+- Retrieval-Augmented Generation (RAG)
+
+### Transcript Processing
+
+- YouTube transcript extraction
+- Timestamped chunking pipeline
 
 ---
 
-## Getting Started
+## Current Limitations
+
+A few things are still on the roadmap.
+
+### Retrieval Is Keyword-Based
+
+Right now retrieval uses full-text search instead of vector embeddings.
+
+That means:
+
+> "recruiting engineers"
+
+may not always match:
+
+> "hiring developers"
+
+even though they mean similar things.
+
+The next major improvement is embedding-based semantic search.
+
+### YouTube Only
+
+The current version focuses entirely on YouTube.
+
+Support for PDFs, articles, podcasts and personal notes is planned in future versions.
+
+---
+
+## Running Locally
+
+Clone the repository:
 
 ```bash
-# Clone the repo
-git clone https://github.com/your-username/second-brain.git
+git clone <repo-url>
 cd second-brain
+```
 
-# Install dependencies
+Install dependencies:
+
+```bash
 npm install
+```
 
-# Add environment variables
-cp .env.example .env
+Create environment variables:
 
-# Run locally
+```env
+CONVEX_DEPLOYMENT=
+NEXT_PUBLIC_CONVEX_URL=
+GEMINI_API_KEY=
+```
+
+Run the app:
+
+```bash
 npm run dev
 ```
 
-> _Fill in any additional setup steps specific to your stack_
+Run Convex:
+
+```bash
+npx convex dev
+```
 
 ---
 
-## Roadmap
+## Future Plans
 
-- [ ] Browser extension for one-click saving
-- [ ] Podcast and audio support
-- [ ] Mobile app
-- [ ] Public knowledge sharing
-- [ ] Spaced repetition and review mode
-
----
-
-## Feedback
-
-This is in active development. If you consume a lot of long-form content and want to try it, reach out — honest feedback is welcome.
+- Semantic search with embeddings
+- PDF support
+- Podcast support
+- Browser extension
+- Mobile app
+- Personal note ingestion
+- Knowledge graph visualization
 
 ---
 
-## License
+## Built For
 
-MIT
+Hackathon 2026.
+
+Built by one person over a few days with a simple goal:
+
+> Make information from YouTube actually retrievable after you've watched it.
+
+---
