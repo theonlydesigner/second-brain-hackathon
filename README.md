@@ -1,141 +1,166 @@
 # Second Brain
 
-Second Brain is a YouTube-first knowledge base that helps you remember and retrieve things from videos you've already watched.
+Turn YouTube videos into a searchable personal knowledge system.
 
-The idea came from a simple problem:
+---
 
-I consume a lot of long-form content — podcasts, startup interviews, lectures, tutorials — and a few weeks later I remember almost none of the useful details.
+## The Problem
 
-I didn't want another bookmarking tool.
+Most of us consume hours of content every week.
 
-I wanted something that could answer:
+Podcasts, interviews, lectures, startup advice, tutorials, deep dives.
 
-> "What did that founder say about hiring?"
+The problem isn't finding information anymore.
 
-without making me rewatch a 2-hour podcast.
+The problem is remembering where you heard it.
 
-So I built Second Brain.
+A useful idea gets buried inside a 2-hour podcast, and a week later you're scrolling through videos trying to find that one moment you vaguely remember.
+
+Second Brain was built to solve that.
+
+Instead of treating YouTube as something you watch once and forget, it turns videos into a knowledge base you can search, organize, and chat with.
 
 ---
 
 ## What It Does
 
-### Save YouTube Videos
+Paste a YouTube URL.
 
-Paste a YouTube URL and Second Brain:
+Second Brain:
 
 - Extracts the transcript
-- Breaks it into timestamped chunks
+- Splits it into timestamped chunks
+- Generates AI insights
 - Stores everything in a searchable knowledge base
+
+From there you can:
+
+- Chat with a single video
+- Ask questions across multiple videos
+- Organize videos into folders
+- Discover connections between different sources
+- Jump back to the exact transcript segments used to generate an answer
 
 ---
 
-### Generate AI Insights
+## Features
 
-For every video, Gemini generates:
+### Transcript Extraction
+
+Paste a YouTube URL and the transcript is automatically extracted and stored.
+
+### AI Insights
+
+Every video receives:
 
 - Summary
 - Key ideas
 - Mental models
 - Notable quotes
 
-This gives a quick overview before diving into the full transcript.
+### Source-Grounded Chat
 
----
+Ask questions about a video and get answers based only on its transcript.
 
-### Chat With a Video
+Every answer includes sources.
 
-Ask questions about a specific video.
+### Timestamp Citations
+
+Answers link back to the exact transcript segments that were used.
+
+You can inspect the evidence instead of blindly trusting the AI.
+
+### Folder Organization
+
+Group related videos together.
 
 Examples:
 
-- What did the speaker say about product-market fit?
-- Summarize the hiring advice.
-- What mistakes should founders avoid?
-
-Answers include source citations and timestamps so you can verify exactly where the information came from.
-
-One thing I focused heavily on was reducing hallucinations.
-
-If the answer is not present in the transcript, the AI should say that instead of inventing something.
-
----
-
-### Organize Videos Into Folders
-
-Videos can be grouped into folders such as:
-
 - Startups
+- Machine Learning
 - Marketing
-- AI
-- Investing
-- Programming
+- Psychology
 
-This makes it easier to build topic-specific knowledge collections.
+### Cross-Video Knowledge Discovery
 
----
-
-### Chat Across Multiple Videos
-
-This is probably my favourite feature.
-
-Instead of querying a single video, you can ask questions across an entire folder.
+Ask questions across an entire folder.
 
 Example:
 
-> "What do all these startup videos say about hiring engineers?"
+> What do all my startup videos say about hiring engineers?
 
-Second Brain searches multiple videos, retrieves relevant transcript sections, and generates a combined answer with sources.
+The system retrieves relevant information from multiple videos and synthesizes a single answer.
+
+### Hallucination Resistance
+
+The goal is not to sound smart.
+
+The goal is to stay faithful to the source material.
+
+For example, when asked:
+
+> What colour are the elephants?
+
+about the famous "Me at the Zoo" video, Second Brain correctly responded that the transcript never mentions the elephants' colour.
+
+Instead of inventing an answer, it admitted the information was unavailable.
 
 ---
 
-## Why I Built It
+## Why I Built This
 
-The internet has made information cheap.
+I watch a lot of long-form content.
 
-Remembering and finding information later is still hard.
+Startup podcasts.
 
-Most of us spend hundreds of hours consuming content but have no system for retrieving it when we actually need it.
+Interviews.
 
-Second Brain tries to solve that.
+Lectures.
 
-Instead of treating videos as content you watch once and forget, it turns them into something you can search, question and learn from repeatedly.
+Technical tutorials.
+
+The same thing kept happening.
+
+I knew I had heard something valuable before, but I couldn't remember where.
+
+I built Second Brain because I wanted YouTube to behave more like a searchable knowledge system and less like an endless feed.
 
 ---
 
 ## Why Not Just Use NotebookLM?
 
-It's a fair question.
+NotebookLM is probably the closest comparison.
 
-NotebookLM is great and solves a similar problem.
+The difference is that Second Brain was designed specifically around YouTube learning.
 
-The difference is that Second Brain is designed around a YouTube-first workflow.
+Instead of treating videos as just another file type, the entire workflow starts with videos.
 
-A few things I focused on:
+Some things I focused on:
 
+- YouTube-first experience
 - Timestamp-level citations
-- Video-centric knowledge management
-- Folder-based knowledge discovery
-- Cross-video synthesis
-- Fast ingestion directly from YouTube links
+- AI-generated video insights
+- Folder organization
+- Cross-video knowledge discovery
+- Source-grounded answers
 
-The goal isn't to replace NotebookLM.
+The goal wasn't to compete with every feature NotebookLM has.
 
-The goal is to create a lightweight personal knowledge system specifically optimized for video content.
+The goal was to build a focused tool for people who learn primarily through YouTube.
 
 ---
 
 ## How It Works
 
-1. User submits a YouTube URL
+1. User pastes a YouTube URL
 2. Transcript is extracted
 3. Transcript is chunked with timestamps
-4. Gemini generates insights
+4. AI generates insights for the video
 5. Chunks are indexed for retrieval
-6. User asks questions
-7. Relevant chunks are retrieved
-8. Gemini answers using only retrieved context
-9. Sources are attached to the response
+6. User asks a question
+7. Relevant transcript chunks are retrieved
+8. AI generates an answer using only retrieved context
+9. Sources are displayed alongside the answer
 
 ---
 
@@ -154,104 +179,103 @@ The goal is to create a lightweight personal knowledge system specifically optim
 
 ### AI
 
-- Gemini 2.5 Flash
-- Automatic fallback handling for model availability issues
+- OpenRouter
+- Multi-model fallback architecture
 
-### Retrieval
+### Search
 
 - Convex Full-Text Search
-- Retrieval-Augmented Generation (RAG)
 
-### Transcript Processing
+### Deployment
 
-- YouTube transcript extraction
-- Timestamped chunking pipeline
+- Vercel
+- Convex Cloud
 
 ---
 
 ## Current Limitations
 
-A few things are still on the roadmap.
+Retrieval currently uses keyword-based full-text search rather than semantic embeddings.
 
-### Retrieval Is Keyword-Based
+For example:
 
-Right now retrieval uses full-text search instead of vector embeddings.
+> hiring engineers
 
-That means:
+may not always match content that only mentions:
 
-> "recruiting engineers"
+> recruiting developers
 
-may not always match:
+This was a deliberate tradeoff during the hackathon to prioritize a complete, reliable end-to-end product.
 
-> "hiring developers"
+Semantic search is the next major improvement planned.
 
-even though they mean similar things.
+---
 
-The next major improvement is embedding-based semantic search.
+## Future Improvements
 
-### YouTube Only
-
-The current version focuses entirely on YouTube.
-
-Support for PDFs, articles, podcasts and personal notes is planned in future versions.
+- Semantic search with embeddings
+- Browser extension
+- Podcast support
+- Mobile application
+- Knowledge graphs
+- Spaced repetition and review mode
 
 ---
 
 ## Running Locally
 
-Clone the repository:
-
 ```bash
 git clone <repo-url>
+
 cd second-brain
-```
 
-Install dependencies:
-
-```bash
 npm install
-```
 
-Create environment variables:
-
-```env
-CONVEX_DEPLOYMENT=
-NEXT_PUBLIC_CONVEX_URL=
-GEMINI_API_KEY=
-```
-
-Run the app:
-
-```bash
 npm run dev
 ```
 
-Run Convex:
+Create a `.env.local` file:
 
-```bash
-npx convex dev
+```env
+NEXT_PUBLIC_CONVEX_URL=
+CONVEX_DEPLOYMENT=
+OPENROUTER_API_KEY=
 ```
 
 ---
 
-## Future Plans
+## Demo Flow
 
-- Semantic search with embeddings
-- PDF support
-- Podcast support
-- Browser extension
-- Mobile app
-- Personal note ingestion
-- Knowledge graph visualization
+1. Paste a YouTube URL
+2. Wait for transcript extraction
+3. AI generates insights
+4. Open the video chat page
+5. Ask questions about the video
+6. Inspect the cited sources
+7. Add videos to a folder
+8. Ask questions across the entire folder
+9. Discover connections between multiple videos
+
+---
+
+## What I'm Most Proud Of
+
+The system knows when it doesn't know.
+
+During testing, we asked:
+
+> What colour are the elephants?
+
+about the "Me at the Zoo" video.
+
+The transcript never mentions the elephants' colour.
+
+Instead of hallucinating an answer, Second Brain correctly stated that the information wasn't present in the source material and cited the relevant transcript section.
+
+For me, that matters more than generating impressive-sounding responses.
 
 ---
 
-## Built For
+## License
 
-Hackathon 2026.
-
-Built by one person over a few days with a simple goal:
-
-> Make information from YouTube actually retrievable after you've watched it.
-
----
+MIT
